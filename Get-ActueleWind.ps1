@@ -14,30 +14,23 @@ function Convert-MeterPerSecondToKnots {
 }
 
 <#
-example:
-windspot    : @{stationcode=6210; stationnaam=Meetstation Katwijk; regio=Katwijk; latGraden=52.18; lonGraden=4.42; windgurucode=48303; windfindercode=katwijk_aan_zee; bannerImg=; virtualspot=1; 
-              bannerUrl=; windrichtingVan=210; windrichtingTot=30}
-regen       : 1
-zon_opkomst : 05:22
-zon_onder   : 22:00
-winddata    : {@{tijdstip=2025-06-08 11:00:04; stationcode=6210; temperatuurGC=13.20; windsnelheidMS=8.8; windstotenMS=12.9; windrichtingGR=284.0; windrichting=WNW; regenMMPU=0.00; icoonactueel=Zwaar 
-              bewolkt}, @{tijdstip=2025-06-08 10:50:03; stationcode=6210; temperatuurGC=12.90; windsnelheidMS=8.1; windstotenMS=10.9; windrichtingGR=284.0; windrichting=WNW; regenMMPU=0.00; 
-              icoonactueel=Zwaar bewolkt en regen}, @{tijdstip=2025-06-08 10:40:03; stationcode=6210; temperatuurGC=12.90; windsnelheidMS=8.1; windstotenMS=10.9; windrichtingGR=284.0; windrichting=WNW; 
-              regenMMPU=0.00; icoonactueel=Zwaar bewolkt en regen}, @{tijdstip=2025-06-08 10:30:02; stationcode=6210; temperatuurGC=12.80; windsnelheidMS=5.4; windstotenMS=10.3; windrichtingGR=285.0; 
-              windrichting=WNW; regenMMPU=0.00; icoonactueel=Zwaar bewolkt en regen}…}
+example response from /api/getSpotDetail.php?id=6210:
+info     : @{stationcode=6210; stationnaam=Meetstation Katwijk; regio=Katwijk; latGraden=52.18; lonGraden=4.42;
+             windrichtingVan=210; windrichtingTot=30; betrouwbaarheid=87; virtualspot=0}
+winddata : {@{tijdstip=2026-05-31 17:20:00; windsnelheidMS=5.8; windstotenMS=8.2; windrichtingGR=263;
+             windrichting=W; regenMMPU=; temperatuurGC=17.4; icoonactueel=Zwaar bewolkt}, ...}
 #>
 
-$uri = "https://actuelewind.nl/getActualSpotData6.php"
+$uri = "https://actuelewind.nl/api/getSpotDetail.php?id=$StationCode"
 
 try {
-    $response = Invoke-RestMethod -Uri $uri -Method Get
-    $SpotData = $response.wind.$StationCode
+    $response = Invoke-RestMethod -Uri $uri -Method Get -Headers @{'User-Agent' = 'ActueleWind-Script/1.0'}
 
-    $StationName = $SpotData.windspot.stationnaam
-    $windrichtingVan = $SpotData.windspot.windrichtingVan
-    $windrichtingTot = $SpotData.windspot.windrichtingTot
-    
-    $LatestWindData = $SpotData.winddata[0]
+    $StationName = $response.info.stationnaam
+    $windrichtingVan = $response.info.windrichtingVan
+    $windrichtingTot = $response.info.windrichtingTot
+
+    $LatestWindData = $response.winddata[0]
 
     $Windsnelheid = Convert-MeterPerSecondToKnots -MetersPerSecond $LatestWindData.windsnelheidMS
     $windrichtingGR = $LatestWindData.windrichtingGR

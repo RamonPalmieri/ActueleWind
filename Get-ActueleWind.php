@@ -11,22 +11,22 @@ function convertMeterPerSecondToKnots($mps) {
 
 $stationCode = $_GET['station'] ?? '6225';
 
-$uri = 'https://actuelewind.nl/getActualSpotData6.php';
+$uri = "https://actuelewind.nl/api/getSpotDetail.php?id={$stationCode}";
 
     try {
-        $json = file_get_contents($uri);
+        $context = stream_context_create(['http' => ['header' => 'User-Agent: ActueleWind-Script/1.0']]);
+        $json = file_get_contents($uri, false, $context);
 
         if ($json === false || empty($json)) {
         throw new Exception("Could not fetch data or empty response.");
     }
 
     $data = json_decode($json, true);
-    $spotData = $data['wind'][$stationCode];
 
-    $stationName = $spotData['windspot']['stationnaam'];
-    $windrichtingVan = $spotData['windspot']['windrichtingVan'];
-    $windrichtingTot = $spotData['windspot']['windrichtingTot'];
-    $latest = $spotData['winddata'][0];
+    $stationName = $data['info']['stationnaam'];
+    $windrichtingVan = $data['info']['windrichtingVan'];
+    $windrichtingTot = $data['info']['windrichtingTot'];
+    $latest = $data['winddata'][0];
 
     $windsnelheid = convertMeterPerSecondToKnots($latest['windsnelheidMS']);
     $windstoten = convertMeterPerSecondToKnots($latest['windstotenMS']);
@@ -51,4 +51,4 @@ $uri = 'https://actuelewind.nl/getActualSpotData6.php';
         "statusCode" => 500,
         "body" => "Error fetching/parsing wind data: " . $e->getMessage()
     ]);
-}                                                                                            1,1           Top
+}
