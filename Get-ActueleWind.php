@@ -9,36 +9,82 @@ function convertMeterPerSecondToKnots($mps) {
     return round($knots, 1, PHP_ROUND_HALF_UP);
 }
 
-$stationCode = $_GET['station'] ?? '6225';
+function resolveLocationCode($stationCode) {
+    $stationCodeMap = [
+        "6225" => "ijmuiden.buitenhaven",
+    ];
 
-$uri = "https://actuelewind.nl/api/getSpotDetail.php?id={$stationCode}";
+    $stationCode = trim((string)$stationCode);
+    return $stationCodeMap[$stationCode] ?? $stationCode;
+}
 
-    try {
-        $context = stream_context_create(['http' => ['header' => 'User-Agent: ActueleWind-Script/1.0']]);
-        $json = file_get_contents($uri, false, $context);
+function fetchJson($uri) {
+    $context = stream_context_create([
+        'http' => [
+            'header' => "User-Agent: ActueleWind-Script/1.0\r\nAccept: application/json\r\n",
+            'timeout' => 10,
+        ],
+    ]);
+    $json = file_get_contents($uri, false, $context);
 
-        if ($json === false || empty($json)) {
+    if ($json === false || empty($json)) {
         throw new Exception("Could not fetch data or empty response.");
     }
 
     $data = json_decode($json, true);
+    if ($data === null && json_last_error() !== JSON_ERROR_NONE) {
+        throw new Exception("Could not parse JSON response: " . json_last_error_msg());
+    }
 
-    $stationName = $data['info']['stationnaam'];
-    $windrichtingVan = $data['info']['windrichtingVan'];
-    $windrichtingTot = $data['info']['windrichtingTot'];
-    $latest = $data['winddata'][0];
+    return $data;
+}
 
-    $windsnelheid = convertMeterPerSecondToKnots($latest['windsnelheidMS']);
-    $windstoten = convertMeterPerSecondToKnots($latest['windstotenMS']);
-    $windrichtingGR = $latest['windrichtingGR'];
+function getDirectionMeasurement($locationCode) {
+    $directionParameter = "Windrichting___20in___20Lucht___20t.o.v.___20ware___20Noorden___20in___20graad";
+    $uri = "https://waterinfo.rws.nl/api/point/latestmeasurement?parameterId=wind";
+    $data = fetchJson($uri);
+
+    foreach (($data['features'] ?? []) as $feature) {
+        $properties = $feature['properties'] ?? [];
+        if (($properties['locationCode'] ?? null) !== $locationCode) {
+            continue;
+        }
+
+        foreach (($properties['measurements'] ?? []) as $measurement) {
+            if (($measurement['parameterId'] ?? null) === $directionParameter) {
+                return $measurement;
+            }
+        }
+    }
+
+    return null;
+}
+
+$stationCode = $_GET['station'] ?? '6225';
+$locationCode = resolveLocationCode($stationCode);
+
+$uri = "https://waterinfo.rws.nl/api/detail/get?locationCode=" . rawurlencode($locationCode) . "&mapType=wind";
+
+try {
+    $data = fetchJson($uri);
+    $latest = $data['latest'] ?? null;
+    if (!$latest) {
+        throw new Exception("No current wind speed found for location '{$locationCode}'.");
+    }
+
+    $direction = getDirectionMeasurement($locationCode);
+    $stationName = $data['location'];
+    $windsnelheid = convertMeterPerSecondToKnots($latest['data']);
+    $windrichtingGR = $direction['latestValue'] ?? null;
 
     $result = [
         "locatie" => $stationName,
-        "windrichtingVan" => $windrichtingVan,
-        "windrichtingTot" => $windrichtingTot,
+        "windrichtingVan" => null,
+        "windrichtingTot" => null,
         "Windsnelheid" => $windsnelheid,
-        "Windstoten" => $windstoten,
-        "windrichtingGR" => $windrichtingGR
+        "windrichtingGR" => $windrichtingGR,
+        "bron" => "Rijkswaterstaat Waterinfo",
+        "refreshSeconds" => (int)(($data['refreshSpeedInMs'] ?? 0) / 1000)
     ];
 
     echo json_encode([
