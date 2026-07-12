@@ -13,34 +13,81 @@ function Convert-MeterPerSecondToKnots {
     return [math]::Round($knots, 1, [MidpointRounding]::AwayFromZero)
 }
 
-<#
-example response from /api/getSpotDetail.php?id=6210:
-info     : @{stationcode=6210; stationnaam=Meetstation Katwijk; regio=Katwijk; latGraden=52.18; lonGraden=4.42;
-             windrichtingVan=210; windrichtingTot=30; betrouwbaarheid=87; virtualspot=0}
-winddata : {@{tijdstip=2026-05-31 17:20:00; windsnelheidMS=5.8; windstotenMS=8.2; windrichtingGR=263;
-             windrichting=W; regenMMPU=; temperatuurGC=17.4; icoonactueel=Zwaar bewolkt}, ...}
-#>
+function Resolve-LocationCode {
+    param (
+        [Parameter(Mandatory)]
+        [string]$StationCode
+    )
 
-$uri = "https://actuelewind.nl/api/getSpotDetail.php?id=$StationCode"
+    $stationCodeMap = @{
+        '6225' = 'ijmuiden.buitenhaven'
+    }
+
+    if ($stationCodeMap.ContainsKey($StationCode)) {
+        return $stationCodeMap[$StationCode]
+    }
+
+    return $StationCode
+}
+
+function Get-WaterinfoJson {
+    param (
+        [Parameter(Mandatory)]
+        [string]$Uri
+    )
+
+    return Invoke-RestMethod -Uri $Uri -Method Get -Headers @{
+        'User-Agent' = 'ActueleWind-Script/1.0'
+        'Accept' = 'application/json'
+    } -TimeoutSec 10
+}
+
+function Get-DirectionMeasurement {
+    param (
+        [Parameter(Mandatory)]
+        [string]$LocationCode
+    )
+
+    $directionParameter = 'Windrichting___20in___20Lucht___20t.o.v.___20ware___20Noorden___20in___20graad'
+    $uri = 'https://waterinfo.rws.nl/api/point/latestmeasurement?parameterId=wind'
+    $data = Get-WaterinfoJson -Uri $uri
+    $feature = $data.features | Where-Object { $_.properties.locationCode -eq $LocationCode } | Select-Object -First 1
+
+    if (-not $feature) {
+        return $null
+    }
+
+    return $feature.properties.measurements |
+        Where-Object { $_.parameterId -eq $directionParameter } |
+        Select-Object -First 1
+}
+
+$LocationCode = Resolve-LocationCode -StationCode $StationCode
+$uri = "https://waterinfo.rws.nl/api/detail/get?locationCode=$([uri]::EscapeDataString($LocationCode))&mapType=wind"
 
 try {
-    $response = Invoke-RestMethod -Uri $uri -Method Get -Headers @{'User-Agent' = 'ActueleWind-Script/1.0'}
+    $response = Get-WaterinfoJson -Uri $uri
 
-    $StationName = $response.info.stationnaam
-    $windrichtingVan = $response.info.windrichtingVan
-    $windrichtingTot = $response.info.windrichtingTot
+    if (-not $response.latest) {
+        throw "No current wind speed found for location '$LocationCode'."
+    }
 
-    $LatestWindData = $response.winddata[0]
+    $direction = Get-DirectionMeasurement -LocationCode $LocationCode
+    $StationName = $response.location
 
-    $Windsnelheid = Convert-MeterPerSecondToKnots -MetersPerSecond $LatestWindData.windsnelheidMS
-    $windrichtingGR = $LatestWindData.windrichtingGR
+    $Windsnelheid = Convert-MeterPerSecondToKnots -MetersPerSecond $response.latest.data
+    $windrichtingGR = if ($direction) { $direction.latestValue } else { $null }
+
+    $refreshSeconds = [int](($response.refreshSpeedInMs ?? 0) / 1000)
 
     $result = @{
         locatie  = $StationName
-        windrichtingVan   = $windrichtingVan
-        windrichtingTot = $windrichtingTot
+        windrichtingVan   = $null
+        windrichtingTot = $null
         Windsnelheid = $Windsnelheid
         windrichtingGR = $windrichtingGR
+        bron = 'Rijkswaterstaat Waterinfo'
+        refreshSeconds = $refreshSeconds
     }
 
     return @{
